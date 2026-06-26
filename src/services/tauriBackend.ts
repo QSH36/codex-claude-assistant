@@ -35,6 +35,24 @@ export interface DownloadPlanItem {
   notes: string;
 }
 
+export interface ApplyProviderConfig {
+  id: string;
+  display_name: string;
+  protocol: string;
+  base_url: string;
+  api_key: string;
+  selected_model?: string;
+  applies_to: string[];
+}
+
+export interface WriteResult {
+  id: string;
+  path: string;
+  backup_path?: string;
+  bytes: number;
+  message: string;
+}
+
 function canInvokeTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -70,6 +88,29 @@ export async function exportDiagnosticReport(content: string) {
   return invoke<{ path: string }>("export_diagnostic_report", {
     request: {
       content,
+    },
+  });
+}
+
+export async function applyConfiguration(request: {
+  providers: ApplyProviderConfig[];
+  skillIndexMarkdown: string;
+  dialogueMarkdown: string;
+  initializeCodex: boolean;
+  initializeClaude: boolean;
+  initializeSkills: boolean;
+  initializeDialogue: boolean;
+}) {
+  if (!canInvokeTauri()) return [];
+  return invoke<WriteResult[]>("apply_configuration", {
+    request: {
+      providers: request.providers,
+      skill_index_markdown: request.skillIndexMarkdown,
+      dialogue_markdown: request.dialogueMarkdown,
+      initialize_codex: request.initializeCodex,
+      initialize_claude: request.initializeClaude,
+      initialize_skills: request.initializeSkills,
+      initialize_dialogue: request.initializeDialogue,
     },
   });
 }

@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, Loader2, RotateCw, ShieldAlert } from "lucide-react";
+import { Activity, CheckCircle2, Loader2, RotateCw, Save, ShieldAlert } from "lucide-react";
 import { clsx } from "clsx";
 import { useInstallerStore } from "../state/useInstallerStore";
 
@@ -12,6 +12,7 @@ function ActionIcon({ status }: { status: string }) {
 export function InstallationStep() {
   const installActions = useInstallerStore((state) => state.installActions);
   const startSimulatedInstall = useInstallerStore((state) => state.startSimulatedInstall);
+  const applyGeneratedConfiguration = useInstallerStore((state) => state.applyGeneratedConfiguration);
   const doneCount = installActions.filter((action) => action.status === "done").length;
   const totalProgress = Math.round(
     installActions.reduce((sum, action) => sum + action.progress, 0) / Math.max(installActions.length, 1),
@@ -24,14 +25,20 @@ export function InstallationStep() {
           <p className="eyebrow">Step 04</p>
           <h2>执行安装与配置</h2>
           <p>
-            真实版本会在这里显示下载、校验、安装、创建快捷方式、配置写入和回滚进度。
-            当前预演不会修改系统，只用于验证交互和状态流。
+            安装器会显示下载、校验、安装、创建快捷方式、配置写入和回滚进度。
+            当前版本已经支持安全写入生成配置；运行时和应用本体安装会继续按白名单适配器补齐。
           </p>
         </div>
-        <button className="primary-button" type="button" onClick={startSimulatedInstall}>
-          <Activity size={16} />
-          运行预演
-        </button>
+        <div className="button-stack">
+          <button className="secondary-button" type="button" onClick={startSimulatedInstall}>
+            <Activity size={16} />
+            运行预演
+          </button>
+          <button className="primary-button" type="button" onClick={applyGeneratedConfiguration}>
+            <Save size={16} />
+            写入生成配置
+          </button>
+        </div>
       </div>
 
       <div className="progress-card">

@@ -7,9 +7,10 @@ import {
   defaultTargets,
   wizardSteps,
 } from "../domain/environment";
-import { buildSkillIndex, builtInSkillCatalog, makeRecommendedSkills } from "../domain/skillCatalog";
 import { mergeDialogueMarkdown, recommendedDialogueMarkdown } from "../domain/dialogueTemplates";
+import { buildSkillIndex, builtInSkillCatalog, makeRecommendedSkills } from "../domain/skillCatalog";
 import {
+  applyConfiguration,
   exportDiagnosticReport,
   loadLocalSkillCatalog,
   readKnownConfigStatus,
@@ -23,8 +24,8 @@ import type {
   ProviderProfile,
   RuntimeId,
   SkillInstallMode,
-  StepStatus,
   StepId,
+  StepStatus,
   WizardStep,
 } from "../domain/types";
 
@@ -53,6 +54,7 @@ interface InstallerStore extends InstallationState {
   loadLocalSkills: () => Promise<void>;
   loadConfigStatuses: () => Promise<void>;
   exportDiagnostics: () => Promise<void>;
+  applyGeneratedConfiguration: () => Promise<void>;
 }
 
 const stepOrder = wizardSteps.map((step) => step.id);
@@ -140,9 +142,7 @@ export const useInstallerStore = create<InstallerStore>((set, get) => ({
   toggleRuntimeInstall: (id) => {
     set((state) => ({
       runtimeChecks: state.runtimeChecks.map((check) =>
-        check.id === id
-          ? { ...check, selectedForInstall: !check.selectedForInstall }
-          : check,
+        check.id === id ? { ...check, selectedForInstall: !check.selectedForInstall } : check,
       ),
     }));
     set((state) => ({
@@ -412,6 +412,79 @@ export const useInstallerStore = create<InstallerStore>((set, get) => ({
     } catch (error) {
       set((state) => ({
         logs: [...state.logs, createLog(`诊断报告导出失败：${String(error)}`, "error")],
+      }));
+    }
+  },
+
+  applyGeneratedConfiguration: async () => {
+    set((state) => ({
+      activeStep: "installation",
+      steps: syncSteps("installation", stepOrder.indexOf("installation")),
+      installActions: state.installActions.map((action) =>
+        ["write-config", "write-skills", "write-dialogue"].includes(action.id)
+          ? { ...action, status: "running", progress: 35 }
+          : action,
+      ),
+      logs: [...state.logs, createLog("开始写入生成配置：会自动备份已存在文件。")],
+    }));
+
+    const state = get();
+    const hasCodex = state.installTargets["codex-cli"] || state.installTargets["codex-desktop"];
+    const hasClaude = state.installTargets["claude-cli"] || state.installTargets["claude-desktop"];
+
+    try {
+      const results = await applyConfiguration({
+        providers: state.providers.map((provider) => ({
+          id: provider.id,
+          display_name: provider.displayName,
+          protocol: provider.protocol,
+          base_url: provider.baseUrl,
+          api_key: provider.apiKey,
+          selected_model: provider.selectedModel,
+          applies_to: provider.appliesTo,
+        })),
+        skillIndexMarkdown: state.getGeneratedSkillIndex(),
+        dialogueMarkdown: state.dialogue.finalMarkdown,
+        initializeCodex: hasCodex,
+        initializeClaude: hasClaude,
+        initializeSkills: true,
+        initializeDialogue: true,
+      });
+
+      if (!results.length) {
+        set((currentState) => ({
+          installActions: currentState.installActions.map((action) =>
+            ["write-config", "write-skills", "write-dialogue"].includes(action.id)
+              ? { ...action, status: "warning", progress: 0 }
+              : action,
+          ),
+          logs: [...currentState.logs, createLog("浏览器预览模式不会写入本机配置，请使用打包后的 Tauri 版本执行。", "warning")],
+        }));
+        return;
+      }
+
+      set((currentState) => ({
+        installActions: currentState.installActions.map((action) =>
+          ["write-config", "write-skills", "write-dialogue"].includes(action.id)
+            ? { ...action, status: "done", progress: 100 }
+            : action,
+        ),
+        logs: [
+          ...currentState.logs,
+          ...results.map((result) =>
+            createLog(`已写入 ${result.path}${result.backup_path ? `，备份：${result.backup_path}` : ""}`, "success"),
+          ),
+        ],
+      }));
+      await get().loadConfigStatuses();
+    } catch (error) {
+      set((currentState) => ({
+        installActions: currentState.installActions.map((action) =>
+          ["write-config", "write-skills", "write-dialogue"].includes(action.id)
+            ? { ...action, status: "error", progress: 100 }
+            : action,
+        ),
+        logs: [...currentState.logs, createLog(`配置写入失败：${String(error)}`, "error")],
       }));
     }
   },

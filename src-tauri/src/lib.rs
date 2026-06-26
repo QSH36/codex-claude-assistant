@@ -5,6 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Serialize)]
@@ -76,6 +77,37 @@ struct DiagnosticExportRequest {
 #[derive(Debug, Serialize)]
 struct DiagnosticExportResult {
     path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ProviderConfig {
+    id: String,
+    display_name: String,
+    protocol: String,
+    base_url: String,
+    api_key: String,
+    selected_model: Option<String>,
+    applies_to: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApplyConfigurationRequest {
+    providers: Vec<ProviderConfig>,
+    skill_index_markdown: String,
+    dialogue_markdown: String,
+    initialize_codex: bool,
+    initialize_claude: bool,
+    initialize_skills: bool,
+    initialize_dialogue: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct WriteResult {
+    id: String,
+    path: String,
+    backup_path: Option<String>,
+    bytes: usize,
+    message: String,
 }
 
 fn run_shell_command(command: &str) -> (bool, Option<i32>, String) {
@@ -166,6 +198,103 @@ fn app_data_path(parts: &[&str]) -> PathBuf {
 fn local_app_data_path(parts: &[&str]) -> PathBuf {
     let base = env::var("LOCALAPPDATA").unwrap_or_else(|_| user_path(&[]).join("AppData\\Local").display().to_string());
     parts.iter().fold(PathBuf::from(base), |path, part| path.join(part))
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn ensure_allowed_path(path: &Path) -> Result<(), String> {
+    let allowed_roots = [user_path(&[]), app_data_path(&[]), local_app_data_path(&[])];
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .map_err(|error| error.to_string())?
+            .join(path)
+    };
+
+    if allowed_roots.iter().any(|root| absolute.starts_with(root)) {
+        Ok(())
+    } else {
+        Err(format!("Refusing to write outside user-owned configuration directories: {}", path.display()))
+    }
+}
+
+fn write_with_backup(id: &str, path: PathBuf, content: &str) -> Result<WriteResult, String> {
+    ensure_allowed_path(&path)?;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let backup_path = if path.exists() {
+        let backup = path.with_extension(format!(
+            "{}.bak.{}",
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("backup"),
+            unix_timestamp()
+        ));
+        fs::copy(&path, &backup).map_err(|error| error.to_string())?;
+        Some(backup)
+    } else {
+        None
+    };
+
+    let temp_path = path.with_extension(format!(
+        "{}.tmp.{}",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("tmp"),
+        unix_timestamp()
+    ));
+    fs::write(&temp_path, content).map_err(|error| error.to_string())?;
+
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| error.to_string())?;
+    }
+
+    fs::rename(&temp_path, &path).map_err(|error| error.to_string())?;
+
+    Ok(WriteResult {
+        id: id.to_string(),
+        path: path.display().to_string(),
+        backup_path: backup_path.map(|backup| backup.display().to_string()),
+        bytes: content.as_bytes().len(),
+        message: "写入完成，原文件已按需备份。".to_string(),
+    })
+}
+
+fn providers_for_app(providers: &[ProviderConfig], app: &str) -> Vec<ProviderConfig> {
+    providers
+        .iter()
+        .filter(|provider| provider.applies_to.iter().any(|target| target == app))
+        .map(|provider| ProviderConfig {
+            id: provider.id.clone(),
+            display_name: provider.display_name.clone(),
+            protocol: provider.protocol.clone(),
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+            selected_model: provider.selected_model.clone(),
+            applies_to: provider.applies_to.clone(),
+        })
+        .collect()
+}
+
+fn provider_json(app: &str, providers: Vec<ProviderConfig>) -> Result<String, String> {
+    let value = serde_json::json!({
+        "generatedBy": "Codex+Claude Assistant",
+        "generatedAt": unix_timestamp(),
+        "app": app,
+        "warning": "This file may contain local API keys if the user chose to initialize providers. Do not upload it.",
+        "providers": providers,
+    });
+
+    serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
 }
 
 fn read_redacted_preview(path: &Path) -> Option<String> {
@@ -404,6 +533,71 @@ fn export_diagnostic_report(request: DiagnosticExportRequest) -> Result<Diagnost
     })
 }
 
+#[tauri::command]
+fn apply_configuration(request: ApplyConfigurationRequest) -> Result<Vec<WriteResult>, String> {
+    let mut results = Vec::new();
+
+    if request.initialize_codex {
+        let codex_providers = providers_for_app(&request.providers, "codex");
+        let content = provider_json("codex", codex_providers)?;
+        results.push(write_with_backup(
+            "codex-provider-draft",
+            user_path(&[".codex", "codex-claude-assistant.providers.json"]),
+            &content,
+        )?);
+    }
+
+    if request.initialize_claude {
+        let claude_providers = providers_for_app(&request.providers, "claude");
+        let content = provider_json("claude", claude_providers)?;
+        results.push(write_with_backup(
+            "claude-provider-draft",
+            user_path(&[".claude", "codex-claude-assistant.providers.json"]),
+            &content,
+        )?);
+
+        results.push(write_with_backup(
+            "cc-switch-provider-draft",
+            user_path(&[".cc-switch", "codex-claude-assistant.providers.json"]),
+            &content,
+        )?);
+    }
+
+    if request.initialize_skills {
+        results.push(write_with_backup(
+            "codex-skill-index",
+            user_path(&[".codex", "skill-routing.generated.zh-CN.md"]),
+            &request.skill_index_markdown,
+        )?);
+
+        results.push(write_with_backup(
+            "claude-skill-index",
+            user_path(&[".claude", "skill-routing.generated.zh-CN.md"]),
+            &request.skill_index_markdown,
+        )?);
+    }
+
+    if request.initialize_dialogue {
+        results.push(write_with_backup(
+            "codex-dialogue",
+            user_path(&[".codex", "AGENTS.generated.md"]),
+            &request.dialogue_markdown,
+        )?);
+
+        results.push(write_with_backup(
+            "claude-dialogue",
+            user_path(&[".claude", "CLAUDE.generated.md"]),
+            &request.dialogue_markdown,
+        )?);
+    }
+
+    if results.is_empty() {
+        return Err("No configuration sections were selected for writing.".to_string());
+    }
+
+    Ok(results)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -423,7 +617,8 @@ pub fn run() {
             load_local_skill_catalog,
             build_download_plan,
             preview_config_writes,
-            export_diagnostic_report
+            export_diagnostic_report,
+            apply_configuration
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

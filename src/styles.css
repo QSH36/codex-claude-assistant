@@ -180,11 +180,16 @@ pre,
 }
 
 .topbar-actions,
-.wizard-footer {
+.wizard-footer,
+.button-stack {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.button-stack {
+  align-items: center;
 }
 
 .wizard-grid {
