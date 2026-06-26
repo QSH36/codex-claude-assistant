@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+src-tauri/target/
+.env
+.env.*
+*.log
+*.tsbuildinfo
+diagnostics/
+offline-cache/
+release/
+qa-*.png
