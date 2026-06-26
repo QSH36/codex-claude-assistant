@@ -48,6 +48,15 @@ Win7 兼容包路线记录：
 npm.cmd run bundle:win7
 ```
 
+Win7 portable 单文件：
+
+```powershell
+npm.cmd run build
+Set-Location electron-win7
+npm.cmd install
+npm.cmd run dist
+```
+
 ## 安全策略
 
 - 不把 API Key、Token、密码写入日志。

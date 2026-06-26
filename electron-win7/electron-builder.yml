@@ -1,0 +1,23 @@
+appId: com.qsh36.codex-claude-assistant.win7
+productName: Codex Claude Assistant Win7
+directories:
+  output: ../release/win7
+files:
+  - dist/**/*
+  - package.json
+  - ../dist/**/*
+extraMetadata:
+  main: dist/main/index.js
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+  signAndEditExecutable: false
+  artifactName: Codex-Claude-Assistant-Win7-Portable-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Codex+Claude Assistant Win7
