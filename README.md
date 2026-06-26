@@ -8,6 +8,7 @@ Windows 桌面安装与配置向导，用于检查并配置 Codex、Claude、Cod
 - Win7 兼容版本：规划为 Electron 22 + React + TypeScript，复用前端和领域模型。
 - UI：7 步安装向导、轻 3D 背景、动效、键盘可达和脱敏日志。
 - 后端：Tauri 命令白名单，当前提供环境扫描、配置状态读取、本机 skill 读取、下载计划预览和诊断导出。
+- 安装动作：通过白名单 recipe 执行 Python/Node/Git/PowerShell、Codex CLI、Claude CLI、Codex++、CC Switch 的安装入口。
 
 ## 功能
 
@@ -63,3 +64,4 @@ npm.cmd run dist
 - 诊断报告会脱敏常见密钥格式。
 - 真实写配置前应展示预览、创建备份，并允许用户跳过初始化。
 - 安装器后端采用白名单命令，不暴露任意 shell 执行入口。
+- 运行真实安装 recipe 前应由用户在 UI 中明确点击执行。

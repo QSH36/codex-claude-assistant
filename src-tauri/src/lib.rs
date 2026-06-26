@@ -110,6 +110,22 @@ struct WriteResult {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct InstallRecipeRequest {
+    id: String,
+    china_mirror_first: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct InstallRecipeResult {
+    id: String,
+    command: String,
+    success: bool,
+    exit_code: Option<i32>,
+    output: String,
+    message: String,
+}
+
 fn run_shell_command(command: &str) -> (bool, Option<i32>, String) {
     let output = Command::new("cmd").args(["/C", command]).output();
 
@@ -126,6 +142,46 @@ fn run_shell_command(command: &str) -> (bool, Option<i32>, String) {
         }
         Err(error) => (false, None, format!("无法执行检测命令：{error}")),
     }
+}
+
+fn install_recipe_command(id: &str, china_mirror_first: bool) -> Result<String, String> {
+    let npm_registry = if china_mirror_first {
+        " --registry=https://registry.npmmirror.com"
+    } else {
+        ""
+    };
+
+    let command = match id {
+        "python" => "winget install -e --id Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements".to_string(),
+        "node" => "winget install -e --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements".to_string(),
+        "git" => "winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements".to_string(),
+        "powershell" => "winget install -e --id Microsoft.PowerShell --silent --accept-package-agreements --accept-source-agreements".to_string(),
+        "codex-cli" => format!("npm.cmd install -g @openai/codex{npm_registry}"),
+        "claude-cli" => format!("npm.cmd install -g @anthropic-ai/claude-code{npm_registry}"),
+        "codex-plus-plus" => [
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command",
+            "\"$release=Invoke-RestMethod https://api.github.com/repos/BigPizzaV3/CodexPlusPlus/releases/latest;",
+            "$asset=$release.assets | Where-Object { $_.name -match 'windows-x64-setup\\\\.exe$' } | Select-Object -First 1;",
+            "if(-not $asset){ throw 'Codex++ Windows x64 installer asset not found' };",
+            "$out=Join-Path $env:TEMP $asset.name;",
+            "Invoke-WebRequest $asset.browser_download_url -OutFile $out;",
+            "Start-Process $out -Wait\"",
+        ].join(" "),
+        "cc-switch" => [
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command",
+            "\"$release=Invoke-RestMethod https://api.github.com/repos/farion1231/cc-switch/releases/latest;",
+            "$asset=$release.assets | Where-Object { $_.name -match 'Windows\\\\.msi$' } | Select-Object -First 1;",
+            "if(-not $asset){ throw 'CC Switch Windows MSI asset not found' };",
+            "$out=Join-Path $env:TEMP $asset.name;",
+            "Invoke-WebRequest $asset.browser_download_url -OutFile $out;",
+            "Start-Process msiexec.exe -ArgumentList '/i', $out, '/passive' -Wait\"",
+        ].join(" "),
+        "codex-desktop" => "start https://openai.com/codex/".to_string(),
+        "claude-desktop" => "start https://claude.ai/download".to_string(),
+        unsupported => return Err(format!("No whitelisted install recipe exists for {unsupported}")),
+    };
+
+    Ok(command)
 }
 
 fn first_successful_probe(id: &str, label: &str, commands: &[&str]) -> CommandProbe {
@@ -598,6 +654,25 @@ fn apply_configuration(request: ApplyConfigurationRequest) -> Result<Vec<WriteRe
     Ok(results)
 }
 
+#[tauri::command]
+fn run_install_recipe(request: InstallRecipeRequest) -> Result<InstallRecipeResult, String> {
+    let command = install_recipe_command(&request.id, request.china_mirror_first)?;
+    let (success, exit_code, output) = run_shell_command(&command);
+
+    Ok(InstallRecipeResult {
+        id: request.id,
+        command,
+        success,
+        exit_code,
+        output,
+        message: if success {
+            "安装配方执行完成。".to_string()
+        } else {
+            "安装配方执行失败，请查看输出并尝试切换镜像或手动安装。".to_string()
+        },
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -618,7 +693,8 @@ pub fn run() {
             build_download_plan,
             preview_config_writes,
             export_diagnostic_report,
-            apply_configuration
+            apply_configuration,
+            run_install_recipe
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -14,6 +14,7 @@ import {
   exportDiagnosticReport,
   loadLocalSkillCatalog,
   readKnownConfigStatus,
+  runInstallRecipe,
   scanEnvironment,
   type ConfigFileStatus,
 } from "../services/tauriBackend";
@@ -55,6 +56,7 @@ interface InstallerStore extends InstallationState {
   loadConfigStatuses: () => Promise<void>;
   exportDiagnostics: () => Promise<void>;
   applyGeneratedConfiguration: () => Promise<void>;
+  runSelectedInstallRecipes: () => Promise<void>;
 }
 
 const stepOrder = wizardSteps.map((step) => step.id);
@@ -487,6 +489,63 @@ export const useInstallerStore = create<InstallerStore>((set, get) => ({
         logs: [...currentState.logs, createLog(`配置写入失败：${String(error)}`, "error")],
       }));
     }
+  },
+
+  runSelectedInstallRecipes: async () => {
+    const state = get();
+    const recipeIds = [
+      ...state.runtimeChecks.filter((check) => check.selectedForInstall).map((check) => check.id),
+      ...Object.entries(state.installTargets)
+        .filter(([, selected]) => selected)
+        .map(([id]) => id as InstallTarget),
+    ];
+
+    if (!recipeIds.length) {
+      set((currentState) => ({
+        logs: [...currentState.logs, createLog("没有选中的安装配方需要执行。", "warning")],
+      }));
+      return;
+    }
+
+    set((currentState) => ({
+      activeStep: "installation",
+      steps: syncSteps("installation", stepOrder.indexOf("installation")),
+      installActions: currentState.installActions.map((action) =>
+        recipeIds.includes(action.targetId as RuntimeId | InstallTarget)
+          ? { ...action, status: "running", progress: 20 }
+          : action,
+      ),
+      logs: [...currentState.logs, createLog(`开始执行 ${recipeIds.length} 个白名单安装配方。`)],
+    }));
+
+    for (const id of recipeIds) {
+      try {
+        const result = await runInstallRecipe(id, state.sourcePreference.chinaMirrorFirst);
+        set((currentState) => ({
+          installActions: currentState.installActions.map((action) =>
+            action.targetId === id
+              ? { ...action, status: result.success ? "done" : "error", progress: 100 }
+              : action,
+          ),
+          logs: [
+            ...currentState.logs,
+            createLog(
+              `${id}：${result.message}${result.output ? ` 输出：${result.output.slice(0, 300)}` : ""}`,
+              result.success ? "success" : "error",
+            ),
+          ],
+        }));
+      } catch (error) {
+        set((currentState) => ({
+          installActions: currentState.installActions.map((action) =>
+            action.targetId === id ? { ...action, status: "error", progress: 100 } : action,
+          ),
+          logs: [...currentState.logs, createLog(`${id} 安装配方失败：${String(error)}`, "error")],
+        }));
+      }
+    }
+
+    await get().scanLocalEnvironment();
   },
 
   resetWizard: () => {

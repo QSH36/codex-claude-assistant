@@ -53,6 +53,15 @@ export interface WriteResult {
   message: string;
 }
 
+export interface InstallRecipeResult {
+  id: string;
+  command: string;
+  success: boolean;
+  exit_code?: number;
+  output: string;
+  message: string;
+}
+
 function canInvokeTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -111,6 +120,25 @@ export async function applyConfiguration(request: {
       initialize_claude: request.initializeClaude,
       initialize_skills: request.initializeSkills,
       initialize_dialogue: request.initializeDialogue,
+    },
+  });
+}
+
+export async function runInstallRecipe(id: string, chinaMirrorFirst: boolean) {
+  if (!canInvokeTauri()) {
+    return {
+      id,
+      command: "",
+      success: false,
+      output: "",
+      message: "浏览器预览模式不会执行安装配方。",
+    } satisfies InstallRecipeResult;
+  }
+
+  return invoke<InstallRecipeResult>("run_install_recipe", {
+    request: {
+      id,
+      china_mirror_first: chinaMirrorFirst,
     },
   });
 }

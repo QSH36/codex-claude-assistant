@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, Loader2, RotateCw, Save, ShieldAlert } from "lucide-react";
+import { Activity, CheckCircle2, DownloadCloud, Loader2, RotateCw, Save, ShieldAlert } from "lucide-react";
 import { clsx } from "clsx";
 import { useInstallerStore } from "../state/useInstallerStore";
 
@@ -13,6 +13,7 @@ export function InstallationStep() {
   const installActions = useInstallerStore((state) => state.installActions);
   const startSimulatedInstall = useInstallerStore((state) => state.startSimulatedInstall);
   const applyGeneratedConfiguration = useInstallerStore((state) => state.applyGeneratedConfiguration);
+  const runSelectedInstallRecipes = useInstallerStore((state) => state.runSelectedInstallRecipes);
   const doneCount = installActions.filter((action) => action.status === "done").length;
   const totalProgress = Math.round(
     installActions.reduce((sum, action) => sum + action.progress, 0) / Math.max(installActions.length, 1),
@@ -33,6 +34,10 @@ export function InstallationStep() {
           <button className="secondary-button" type="button" onClick={startSimulatedInstall}>
             <Activity size={16} />
             运行预演
+          </button>
+          <button className="secondary-button" type="button" onClick={runSelectedInstallRecipes}>
+            <DownloadCloud size={16} />
+            执行安装配方
           </button>
           <button className="primary-button" type="button" onClick={applyGeneratedConfiguration}>
             <Save size={16} />
